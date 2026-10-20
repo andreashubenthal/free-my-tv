@@ -149,6 +149,7 @@ final class Ui {
     static Locale locale() {
         return ru ? RU : es ? spanish() : de ? german() : en ? Locale.US : PT;
     }
+}
 
     /** The TV's own Spanish (es-MX, es-AR…) when it is in Spanish, Spain's otherwise. */
     private static Locale spanish() {

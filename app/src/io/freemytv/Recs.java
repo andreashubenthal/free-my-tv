@@ -32,10 +32,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Home screen picks ("This morning / afternoon / tonight"): what's trending this week plus recent releases, only from
+ * Home screen picks ("This morning / afternoon / tonight"): what's trending today plus recent releases, only from
  * the streaming apps installed on the TV (Netflix, Prime Video, Disney+, Max, Apple TV, Hulu, Paramount+, Peacock,
- * Globoplay...), via TMDB (an open movie database that knows what streams where in each country). Three per hour.
- * "Watch" opens the service's app.
+ * Globoplay...), via TMDB (an open movie database that knows what streams where in each country). Up to 7, mixed
+ * movies and shows on one page. "Watch" opens the service's app (on its search for the title when it allows it);
+ * the trailer plays in YouTube when there is one.
  *
  * Each person uses their own free TMDB key (config.properties "tmdb_key", built into the app). It never goes to the log.
  */
@@ -43,7 +44,7 @@ final class Recs {
     static final class Pick {
         int id;
         String kind;            // "movie" or "tv"
-        String title, backdrop, meta = "", app, pkg;
+        String title, backdrop, meta = "", app, pkg, trailer;
         boolean detailed;
     }
 
@@ -53,7 +54,7 @@ final class Recs {
     private static final String IMAGES = "https://image.tmdb.org/t/p/original";
     private static final long LIST_EVERY = 6 * 3600_000L;
     /** Bump when what is saved for each title changes (the saved list is discarded and fetched again). */
-    private static final int CACHE_VERSION = 3;
+    private static final int CACHE_VERSION = 6;
     private static final int MANHA = 0, TARDE = 1, NOITE = 2;
     static final String[] PERIOD_LABEL = {"PARA ESTA MANHÃ", "PARA ESTA TARDE", "PARA ESTA NOITE"};
     static final String[] PERIOD_LABEL_RU = {"ЭТИМ УТРОМ", "СЕГОДНЯ ДНЁМ", "СЕГОДНЯ ВЕЧЕРОМ"};
@@ -170,7 +171,10 @@ final class Recs {
         return now(null);
     }
 
-    /** This hour's 3, movies only ("movie") or shows only ("tv"); null = both (the home screen tabs). */
+    /** How many picks share the single page (the featured one plus the compact rows). */
+    static final int COUNT = 7;
+
+    /** This hour's picks, movies and shows mixed (the single page); `kind` filters to movies or shows only. */
     List<Pick> now(String kind) {
         List<Pick> list = new ArrayList<>();
         if (!hasKey(context)) return list;    // no TMDB key: no recommendations
@@ -181,11 +185,12 @@ final class Recs {
         }
         if (list.isEmpty()) return list;
         long hour = System.currentTimeMillis() / 3600_000L;
-        // Three per hour, never two from the same franchise ("Law & Order" and "Law & Order: Special…").
+        // A window of COUNT, rotating every hour, never two from the same franchise ("Law & Order" and "Law & Order: Special…").
         List<Pick> out = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
-        for (int i = 0; i < list.size() && out.size() < 3; i++) {
-            Pick p = list.get((int) ((hour * 3 + i) % list.size()));
+        int start = list.isEmpty() ? 0 : (int) ((hour * COUNT) % list.size());
+        for (int i = 0; i < list.size() && out.size() < COUNT; i++) {
+            Pick p = list.get((start + i) % list.size());
             if (seen.add(franchise(p.title))) out.add(p);
         }
         return out;
@@ -349,14 +354,9 @@ final class Recs {
         });
     }
 
-    /** This hour's picks for the three tabs (Explore, Movies, Shows), without repeats. */
+    /** This hour's picks for the single page, without repeats. */
     List<Pick> wanted() {
-        List<Pick> out = new ArrayList<>();
-        java.util.Set<String> seen = new java.util.HashSet<>();
-        for (String kind : new String[] {null, "movie", "tv"}) {
-            for (Pick p : now(kind)) if (seen.add(key(p))) out.add(p);
-        }
-        return out;
+        return now(null);
     }
 
     /** Movies and shows are numbered separately on TMDB: a pick is identified by type + number. */
@@ -384,11 +384,11 @@ final class Recs {
         for (int id : services.keySet()) ids.append(ids.length() == 0 ? "" : "|").append(id);
         String common = "&language=" + lang() + "&watch_region=" + REGION + "&with_watch_monetization_types=flatrate&include_adult=false"
                 + "&sort_by=popularity.desc&with_watch_providers=" + URLEncoder.encode(ids.toString(), "UTF-8");
-        // 1. Trending this week (TMDB goes by what people are watching and searching for right now), only what is
+        // 1. Trending today (TMDB goes by what people are watching and searching for right now), only what is
         //    on one of the TV's services: the details say where (and are then ready).
         List<Pick> hotMovies = new ArrayList<>(), hotShows = new ArrayList<>();
         for (String kind : new String[] {"movie", "tv"}) {
-            JSONArray hot = get("/trending/" + kind + "/week?language=" + lang()).getJSONArray("results");
+            JSONArray hot = get("/trending/" + kind + "/day?language=" + lang()).getJSONArray("results");
             List<Pick> candidates = new ArrayList<>();
             for (int i = 0; i < hot.length() && i < 20; i++) add(candidates, hot.getJSONObject(i), kind);
             for (Pick pick : candidates) {
@@ -425,7 +425,7 @@ final class Recs {
     private static String lang() {
         if (Ui.ru) return "ru-RU";
         if (Ui.es) return "ES".equals(java.util.Locale.getDefault().getCountry()) ? "es-ES" : "es-MX";
-        if (Ui.de) return "de-DE";   // TMDB's de-AT and de-CH have few translations of their own
+        if (Ui.de) return "de-DE";
         return Ui.en ? "en-US" : "pt-BR";
     }
 
@@ -454,13 +454,14 @@ final class Recs {
         list.add(p);
     }
 
-    /** Genre, runtime (or seasons) and the service it's on, among the ones the TV has. */
+    /** Genre, runtime (or seasons), the service it's on, and the YouTube trailer key, when there is one. */
     private void fetchDetails(Pick p) throws Exception {
         JSONObject o = get("/" + p.kind + "/" + p.id
-                + "?language=" + lang() + "&append_to_response=watch/providers,images&include_image_language=null," + Ui.language + ",en");
+                + "?language=" + lang() + "&append_to_response=watch/providers,images,videos&include_image_language=null," + Ui.language + ",en");
         p.title = title(p, o);
         String best = bestBackdrop(o.optJSONObject("images"));
         if (best != null) p.backdrop = best;
+        p.trailer = bestTrailer(o.optJSONObject("videos"));
         List<String> parts = new ArrayList<>();
         JSONArray genres = o.optJSONArray("genres");
         if (p.kind.equals("tv")) parts.add(Ui.tr("Série", "Series"));
@@ -525,7 +526,8 @@ final class Recs {
         {"Soap", "Telenovela"}, {"Talk", "Entrevistas"},
     };
     private static final String[][] GENRES_DE = {
-        {"Action & Adventure", "Action & Abenteuer"}, {"War & Politics", "Krieg & Politik"}, {"Kids", "Kinder"},
+        {"Action & Adventure", "Action & Abenteuer"}, {"Sci-Fi & Fantasy", "Sci-Fi & Fantasy"},
+        {"War & Politics", "Krieg & Politik"}, {"Kids", "Kinder"},
         {"News", "Nachrichten"}, {"Soap", "Seifenoper"}, {"Talk", "Talkshow"},
     };
 
@@ -555,6 +557,25 @@ final class Recs {
             }
         }
         return best;
+    }
+
+    /**
+     * The title's YouTube trailer key: an official trailer first, any trailer or teaser as a fallback.
+     */
+    private static String bestTrailer(JSONObject videos) {
+        JSONArray list = videos == null ? null : videos.optJSONArray("results");
+        String fallback = null;
+        for (int i = 0; list != null && i < list.length(); i++) {
+            JSONObject v = list.optJSONObject(i);
+            if (v == null || !"YouTube".equalsIgnoreCase(v.optString("site"))) continue;
+            String type = v.optString("type"), key = v.optString("key", "");
+            if (key.isEmpty()) continue;
+            if ("Trailer".equalsIgnoreCase(type)) {
+                if (v.optBoolean("official")) return key;
+                if (fallback == null) fallback = key;
+            } else if (fallback == null && "Teaser".equalsIgnoreCase(type)) fallback = key;
+        }
+        return fallback;
     }
 
     private static String[] service(String name) {
@@ -692,7 +713,7 @@ final class Recs {
             for (Pick p : picks) {
                 a.put(new JSONObject().put("id", p.id).put("kind", p.kind).put("title", p.title).put("backdrop", p.backdrop)
                         .put("meta", p.meta).put("app", p.app == null ? "" : p.app).put("pkg", p.pkg == null ? "" : p.pkg)
-                        .put("detailed", p.detailed));
+                        .put("detailed", p.detailed).put("trailer", p.trailer == null ? JSONObject.NULL : p.trailer));
             }
             cache.edit().putString("picks", a.toString()).putInt("period", period).putLong("listAt", listAt)
                     .putString("language", listLanguage)
@@ -715,6 +736,7 @@ final class Recs {
             p.app = o.optString("app").isEmpty() ? null : o.optString("app");
             p.pkg = o.optString("pkg").isEmpty() ? null : o.optString("pkg");
             p.detailed = o.optBoolean("detailed");
+            p.trailer = o.isNull("trailer") ? null : o.optString("trailer");
             out.add(p);
         }
         return out;

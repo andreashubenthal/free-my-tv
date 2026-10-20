@@ -135,7 +135,9 @@ final class German {
                 }
                 if (english.startsWith("On · ")) {
                     return "An · " + english.substring(5).replace(" titles from the TV's apps, 3 new ones every hour.",
-                            " Titel aus den Apps des Fernsehers, 3 neue pro Stunde.");
+                            " Titel aus den Apps des Fernsehers, 3 neue pro Stunde.").replace(
+                            " titles from the TV's apps, refreshed every hour.",
+                            " Titel aus den Apps des Fernsehers, stündlich aktualisiert.");
                 }
                 if (english.startsWith("OK adds or removes (up to ")) {
                     return "OK fügt hinzu oder entfernt (bis zu " + english.substring("OK adds or removes (up to ".length())

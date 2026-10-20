@@ -63,6 +63,7 @@ final class HomeApps {
     static final class Item {
         int kind;
         String key, label, pkg, inputId, number;
+        String query;     // title to search for (the Watch button of a pick); null = just open the app
         String symbol;      // icon for the shortcuts and special cards
         Bitmap tile;        // 16:9 card (apps and specials)
         Bitmap logo;        // colored logo with no background (shelf); null = use the card
@@ -90,6 +91,7 @@ final class HomeApps {
         {"peacock", "Peacock", "com.peacocktv.peacockandroid", "6E55DC", "", "1"},
         {"globoplay", "Globoplay", "com.globo.globotv", "FF5A1F", "tint", "1"},
         {"spotify", "Spotify", "com.spotify.tv.android", "1DB954", "", "1"},
+        {"waipu", "waipu.tv", "de.exaring.waipu", "E6007E", "", "1"},
     };
     static final int MAX_SHELF = 8;
     /** Live TV apps of some brands (the antenna's channels open through the standard Android request first). */
@@ -223,11 +225,17 @@ final class HomeApps {
 
     /** A streaming service's app (the "Watch" button of the featured pick). */
     static Item app(String pkg, String label) {
+        return app(pkg, label, null);
+    }
+
+    /** Same, but tries to land on the service's search for `query` first (falls back to the app itself). */
+    static Item app(String pkg, String label, String query) {
         Item it = new Item();
         it.kind = APP;
         it.key = pkg;
         it.pkg = pkg;
         it.label = label;
+        it.query = query;
         return it;
     }
 
@@ -237,6 +245,11 @@ final class HomeApps {
         if (liveTv(c) != null) items.add(shortcut(LIVE_TV, "live", Ui.tr("TV ao Vivo", "Live TV"), "tv"));
         items.addAll(inputs(c, true));
         return items;
+    }
+
+    /** Whether the device reports any HDMI inputs at all (TVs do; streamers like the Shield don't). */
+    static boolean hasInputs(Context c) {
+        return !inputs(c, true).isEmpty();
     }
 
     private static List<Item> inputs(Context c) {
@@ -363,7 +376,7 @@ final class HomeApps {
         Intent intent;
         switch (it.kind) {
             case APP:
-                intent = launchIntent(a.getPackageManager(), it.pkg);
+                intent = searchIntent(a.getPackageManager(), it.pkg, it.query);
                 if (intent != null) intent.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 break;
             case LIVE_TV:
@@ -398,6 +411,9 @@ final class HomeApps {
      */
     static Intent liveTv(Context c) {
         PackageManager pm = c.getPackageManager();
+        // waipu.tv as the live TV app (German streaming, no antenna on Shield): prefer it when installed.
+        Intent waipu = launchIntent(pm, "de.exaring.waipu");
+        if (waipu != null) return waipu;
         String tuner = tunerInput(c);
         Intent mediaTek = launchIntent(pm, "com.mediatek.wwtv.tvcenter");
         if (mediaTek != null && tuner != null) {
@@ -442,6 +458,77 @@ final class HomeApps {
     static Intent launchIntent(PackageManager pm, String pkg) {
         Intent intent = pm.getLeanbackLaunchIntentForPackage(pkg);
         return intent != null ? intent : pm.getLaunchIntentForPackage(pkg);
+    }
+
+    /**
+     * Plays the YouTube trailer: in the YouTube TV app when it is there, else wherever links open.
+     * Returns false when nothing takes it.
+     */
+    static boolean playTrailer(Activity a, String key, View from, int x, int y, int w, int h) {
+        if (key == null || key.isEmpty()) return false;
+        PackageManager pm = a.getPackageManager();
+        android.net.Uri uri = android.net.Uri.parse("https://www.youtube.com/watch?v=" + key);
+        Intent intent = null;
+        String yt = "com.google.android.youtube.tv";
+        if (launchIntent(pm, yt) != null) {
+            Intent app = new Intent(Intent.ACTION_VIEW, uri).setPackage(yt)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (app.resolveActivity(pm) != null) intent = app;
+        }
+        if (intent == null) {
+            Intent web = new Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (web.resolveActivity(pm) != null) intent = web;
+        }
+        if (intent == null) return false;
+        try {
+            a.startActivity(intent, ActivityOptions.makeScaleUpAnimation(from, x, y, Math.max(w, 1), Math.max(h, 1)).toBundle());
+            return true;
+        } catch (ActivityNotFoundException | SecurityException e) {
+            AppLog.w("couldn't play trailer: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Opens the app straight on its search for `title` when the app allows it, else the app itself (null query
+     * included). First an explicit search request, then the service's search page as a link the app may claim;
+     * every step is checked, so an app that takes neither just opens as before.
+     */
+    static Intent searchIntent(PackageManager pm, String pkg, String title) {
+        if (title != null && !title.isEmpty()) {
+            try {
+                Intent search = new Intent(Intent.ACTION_SEARCH).setPackage(pkg)
+                        .putExtra(android.app.SearchManager.QUERY, title)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (search.resolveActivity(pm) != null) return search;
+            } catch (RuntimeException ignored) {
+            }
+            String page = SEARCH_PAGES.get(pkg);
+            if (page != null) {
+                try {
+                    String url = String.format(page, java.net.URLEncoder.encode(title, "UTF-8"));
+                    Intent view = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).setPackage(pkg)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (view.resolveActivity(pm) != null) return view;
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return launchIntent(pm, pkg);
+    }
+
+    /** Service search pages (claimed as app links by some TV apps): package → URL with %s for the title. */
+    private static final Map<String, String> SEARCH_PAGES = new HashMap<>();
+    static {
+        SEARCH_PAGES.put("com.netflix.ninja", "https://www.netflix.com/search?q=%s");
+        SEARCH_PAGES.put("com.amazon.amazonvideo.livingroom", "https://app.primevideo.com/search?phrase=%s");
+        SEARCH_PAGES.put("com.disney.disneyplus", "https://www.disneyplus.com/search?q=%s");
+        SEARCH_PAGES.put("com.wbd.stream", "https://play.max.com/search?query=%s");
+        SEARCH_PAGES.put("com.apple.atve.androidtv.appletv", "https://tv.apple.com/search?term=%s");
+        SEARCH_PAGES.put("com.hulu.livingroomplus", "https://www.hulu.com/search?q=%s");
+        SEARCH_PAGES.put("com.cbs.ott", "https://www.paramountplus.com/search/?query=%s");
+        SEARCH_PAGES.put("com.peacocktv.peacockandroid", "https://www.peacocktv.com/search?q=%s");
+        SEARCH_PAGES.put("com.globo.globotv", "https://globoplay.globo.com/busca/?q=%s");
     }
 
     // MARK: - Colored logos (shelf)

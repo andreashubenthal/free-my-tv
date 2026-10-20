@@ -57,6 +57,24 @@ final class HomeMode {
      */
     static final String[] DEBLOAT = {
         "com.google.android.play.games", "com.google.android.youtube.tvmusic",        // Play Games, YouTube Music
+        "com.google.android.feedback",                                                // Google crash reports
+        // NVIDIA Shield (see cleanyourtv's nvidia-shield-tv-pro-2019 list): telemetry, partner
+        // auto-installs, GameStream/Games leftovers, the photo viewer, the print spooler, factory
+        // and beta stubs, and idle system stubs. Updates (ota), the SMB share, Live Channels and
+        // the Assistant stay on purpose.
+        "com.nvidia.stats", "com.nvidia.feedback", "com.nvidia.diagtools",            // usage stats, crash reports, log collector
+        "android.autoinstalls.config.nvidia",                                         // Play auto-installs of partner apps
+        "com.nvidia.nvgamecast", "com.nvidia.tegrazone3",                             // GameStream receiver, NVIDIA Games hub
+        "com.android.gallery3d", "com.android.printspooler",                          // legacy photo viewer, print spooler
+        "com.nvidia.shield.registration", "com.nvidia.developerwidget",               // product registration, developer widget
+        "com.nvidia.tegraprofiler.security", "com.nvidia.factorysyschecker",         // profiler permissions, factory test
+        "com.nvidia.factory", "com.nvidia.inputviewer",                               // factory test mode, input test viewer
+        "com.nvidia.shield.welcome", "com.nvidia.factorybundling",                    // first-run promo, bundle offers
+        "com.nvidia.shield.beta", "com.nvidia.shieldbeta",                            // beta programme
+        "com.android.dynsystem", "com.android.hotspot2.osulogin",                     // GSI loader, hotspot sign-in
+        "com.android.bluetoothmidiservice",                                           // Bluetooth MIDI
+        "com.android.cts.ctsshim", "com.android.cts.priv.ctsshim",                    // CTS test shims
+        "com.google.android.onetimeinitializer", "com.android.wallpaperbackup",        // first-boot setup, wallpaper backup
         // TCL
         "com.tcl.magiconnectfree", "com.tcl.miracast",                                // screen mirroring apps
         "com.tcl.waterfall.overseas", "com.tcl.channelplus",                          // TCL Channel and its Live TV
@@ -106,7 +124,13 @@ final class HomeMode {
         "mitv.service", "com.mi.bluetooth", "com.mitv.livetv.ci_mediatek", "com.xiaomi.tvqs.overseas",
         "com.mitv.tvlock", "com.xiaomi.mitv.updateservice", "com.xiaomi.android.tvsetup.partnercustomizer",
         "com.mitv.overseaservice", "com.xiaomi.mitv.tvmanager", "com.xiaomi.wfdsinkhelperservice",
-        "com.mitv.milinkservice", "com.xiaomi.mitv.smartshare", "android.autoinstalls.config.xiaomi.amelie"));
+        "com.mitv.milinkservice", "com.xiaomi.mitv.smartshare", "android.autoinstalls.config.xiaomi.amelie",
+        // NVIDIA Shield: remote and controller pairing, display and audio, system services (never touched)
+        "com.nvidia.blakepairing", "com.nvidia.ControllerMapper", "com.nvidia.remotelocator",
+        "com.nvidia.irtuner", "com.nvidia.shieldtech.accessoryui",
+        "com.nvidia.NvCPLSvc", "com.nvidia.nvaudiosvc", "com.nvidia.avsync",
+        "com.nvidia.shieldservice", "com.nvidia.packagemanagerservice", "com.nvidia.KeyComboOta",
+        "com.android.providers.tv"));
 
     /** One switch at a time (jobs can overlap: a boot check and a button press). */
     private static final Object RUN = new Object();
