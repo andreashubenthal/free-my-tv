@@ -65,6 +65,14 @@ final class Prefs {
 
     static void setLanguage(String v) { put("language", v); Ui.applyLanguage(); }
 
+    /** The Live TV button's app ("auto" = the TV's tuner/live channels); a package set on the TV wins. */
+    static String liveTv() {
+        String v = app == null ? "auto" : sp().getString("livetv", "auto");
+        return v == null || v.trim().isEmpty() ? "auto" : v.trim();
+    }
+
+    static void setLiveTv(String v) { put("livetv", v); }
+
     /** "auto", "C" or "F". */
     static String temperature() {
         String v = sp().getString("temperature", Config.TEMPERATURE).trim().toUpperCase(Locale.ROOT);

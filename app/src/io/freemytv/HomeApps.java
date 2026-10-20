@@ -411,9 +411,12 @@ final class HomeApps {
      */
     static Intent liveTv(Context c) {
         PackageManager pm = c.getPackageManager();
-        // waipu.tv as the live TV app (German streaming, no antenna on Shield): prefer it when installed.
-        Intent waipu = launchIntent(pm, "de.exaring.waipu");
-        if (waipu != null) return waipu;
+        // Picked on the TV (Settings > Home Settings > Live TV): that app, when still installed.
+        String picked = Prefs.liveTv();
+        if (!"auto".equals(picked)) {
+            Intent chosen = launchIntent(pm, picked);
+            if (chosen != null) return chosen;
+        }
         String tuner = tunerInput(c);
         Intent mediaTek = launchIntent(pm, "com.mediatek.wwtv.tvcenter");
         if (mediaTek != null && tuner != null) {

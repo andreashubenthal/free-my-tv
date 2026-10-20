@@ -124,6 +124,7 @@ public class SettingsActivity extends Activity {
         private final Handler handler = new Handler(Looper.getMainLooper());
         private final Spring[] pop = new Spring[12];
         private final List<String> appPkgs = new ArrayList<>(), appLabels = new ArrayList<>();
+        private final List<String> liveTvPkgs = new ArrayList<>(), liveTvLabels = new ArrayList<>();
         // The list picker (the app of a remote button): what it shows, which one is in use, where we are.
         private final List<String> pickLabels = new ArrayList<>();
         // The shelf editor: the apps it can hold (selected ones first, in order) and the selection.
@@ -625,8 +626,8 @@ public class SettingsActivity extends Activity {
         // MARK: - Home Settings and Remote Buttons
 
         private static final String[] LANGUAGES = {"auto", "pt", "en", "es", "de", "ru"}, UNITS = {"auto", "C", "F"}, THEMES = {"auto", "light", "dark"};
-        /** Home Settings: language, temperature, theme, weather, quotes, then one row per coin. */
-        private static final int CITY_ROW = 4, COIN_ROWS = 6;
+        /** Home Settings: language, temperature, theme, weather, city, quotes, live TV, then one row per coin. */
+        private static final int CITY_ROW = 4, LIVE_ROW = 6, COIN_ROWS = 7;
 
         private boolean dollar() {
             return "BRL".equalsIgnoreCase(Config.CURRENCY.trim());
@@ -640,6 +641,7 @@ public class SettingsActivity extends Activity {
             l.add(Ui.tr("Widget do clima", "Weather widget"));
             l.add(Ui.tr("Cidade", "City"));
             l.add(Ui.tr("Widget de cotações", "Quotes widget"));
+            l.add(Ui.tr("TV ao Vivo", "Live TV"));
             l.add("Bitcoin");
             l.add("Ethereum");
             l.add("Solana");
@@ -660,6 +662,7 @@ public class SettingsActivity extends Activity {
             v[3] = onOff(Prefs.weather());
             v[CITY_ROW] = !cityStatus.isEmpty() ? cityStatus : Prefs.city().isEmpty() ? "—" : Prefs.city();
             v[5] = onOff(Prefs.quotes());
+            v[LIVE_ROW] = liveTvLabel();
             // No quotes widget, nowhere to show prices: the coins read as off (and stay locked) until it is back on.
             for (int i = COIN_ROWS; i < v.length; i++) v[i] = onOff(Prefs.quotes() && Prefs.coin(i - COIN_ROWS));
             return v;
@@ -667,6 +670,20 @@ public class SettingsActivity extends Activity {
 
         private static String onOff(boolean on) {
             return on ? Ui.tr("Ligado", "On") : Ui.tr("Desligado", "Off");
+        }
+
+        /** The Live TV button's app ("auto" first): the picked app's name, or Automatic. */
+        private String liveTvLabel() {
+            String pkg = Prefs.liveTv();
+            if ("auto".equals(pkg)) return Ui.tr("Automático", "Automatic");
+            int at = liveTvPkgs.indexOf(pkg);
+            if (at >= 0) return liveTvLabels.get(at);
+            try {
+                PackageManager pm = getContext().getPackageManager();
+                return String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)));
+            } catch (Exception ignored) {
+                return pkg;
+            }
         }
 
         private String[] keyLabels() {
@@ -704,6 +721,14 @@ public class SettingsActivity extends Activity {
                 appPkgs.add(f[0]);
                 appLabels.add(f[1]);
             }
+            liveTvPkgs.clear();
+            liveTvLabels.clear();
+            liveTvPkgs.add("auto");
+            liveTvLabels.add(Ui.tr("Automático", "Automatic"));
+            for (String[] f : found) {
+                liveTvPkgs.add(f[0]);
+                liveTvLabels.add(f[1]);
+            }
         }
 
         /** Changes the focused row's value one step (OK and → go forward, ← goes back). */
@@ -734,6 +759,12 @@ public class SettingsActivity extends Activity {
                 case 3: Prefs.setWeather(!Prefs.weather()); break;
                 case CITY_ROW: return;
                 case 5: Prefs.setQuotes(!Prefs.quotes()); break;
+                case LIVE_ROW: {
+                    int n = liveTvPkgs.size();
+                    int at = liveTvPkgs.indexOf(Prefs.liveTv());
+                    Prefs.setLiveTv(liveTvPkgs.get(at < 0 ? (dir > 0 ? 0 : n - 1) : (at + dir + n) % n));
+                    break;
+                }
                 default:
                     if (!Prefs.quotes()) return;
                     Prefs.setCoin(focus - COIN_ROWS, !Prefs.coin(focus - COIN_ROWS));
