@@ -760,7 +760,9 @@ public class SettingsActivity extends Activity {
                 case CITY_ROW: return;
                 case 5: Prefs.setQuotes(!Prefs.quotes()); break;
                 case LIVE_ROW: {
+                    if (liveTvPkgs.isEmpty()) loadApps();
                     int n = liveTvPkgs.size();
+                    if (n == 0) break;
                     int at = liveTvPkgs.indexOf(Prefs.liveTv());
                     Prefs.setLiveTv(liveTvPkgs.get(at < 0 ? (dir > 0 ? 0 : n - 1) : (at + dir + n) % n));
                     break;
@@ -1025,6 +1027,7 @@ public class SettingsActivity extends Activity {
                 pause();
                 activity.showPreview();
             } else if (focus == 2) {
+                loadApps();   // also fills the Live TV candidates for Home Settings
                 screen = HOME_SETTINGS;
                 focus = 0;
             } else if (focus == 3) {
