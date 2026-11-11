@@ -191,6 +191,11 @@ final class Prefs {
         version++;
     }
 
+    private static void put(String key, Set<String> value) {
+        sp().edit().putStringSet(key, new HashSet<>(value)).apply();
+        version++;
+    }
+
     /**
      * Without bumping `version`: a new version makes the home screen start over (and fetch the weather and prices
      * again). Continue Watching's lists don't need that: the home screen reads them on every return (reload).
@@ -380,6 +385,57 @@ final class Prefs {
     /** Your photos (Photos, sent from a computer) on the screensaver and behind the home screen, once imported. */
     static boolean photos() { return sp().getBoolean("photos", true); }
     static void setPhotos(boolean on) { put("photos", on); }
+
+    /** The Live TV shortcut in the drawer: off hides it, for a streamer without a tuner that watches TV in an app. */
+    static boolean liveTv() { return sp().getBoolean("liveTv", true); }
+    static void setLiveTv(boolean on) { put("liveTv", on); }
+
+    /** The apps that ask for the PIN before they open (Home Settings > Locked apps). */
+    static Set<String> lockedApps() { return new HashSet<>(sp().getStringSet("lockedApps", new HashSet<>())); }
+    static void setLockedApps(Set<String> pkgs) { put("lockedApps", pkgs); }
+
+    /** Whether opening this app has to ask for the PIN: only while a PIN is set. */
+    static boolean locked(String pkg) { return pkg != null && pinSet() && lockedApps().contains(pkg); }
+
+    /**
+     * The PIN, as a salt and its SHA-256 (Home Settings > PIN): the PIN itself is never stored. An empty PIN removes
+     * the salt and the hash, and with them the lock.
+     */
+    static boolean pinSet() { return !sp().getString("pinHash", "").isEmpty(); }
+
+    static void setPin(String pin) {
+        if (pin == null || pin.isEmpty()) {
+            put("pinSalt", "");
+            put("pinHash", "");
+            return;
+        }
+        byte[] salt = new byte[16];
+        new java.security.SecureRandom().nextBytes(salt);
+        String s = hex(salt);
+        put("pinSalt", s);
+        put("pinHash", hash(s, pin));
+    }
+
+    static boolean checkPin(String pin) {
+        String want = sp().getString("pinHash", "");
+        return !want.isEmpty() && hash(sp().getString("pinSalt", ""), pin == null ? "" : pin).equals(want);
+    }
+
+    private static String hash(String salt, String pin) {
+        try {
+            byte[] d = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((salt + pin).getBytes(StandardCharsets.UTF_8));
+            return hex(d);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return "";
+        }
+    }
+
+    private static String hex(byte[] bytes) {
+        StringBuilder out = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) out.append(String.format("%02x", b));
+        return out.toString();
+    }
 
     /**
      * With an Immich server, where My Photos come from: "default" (none of yours: the picks' photos, as without

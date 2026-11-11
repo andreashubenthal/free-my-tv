@@ -976,13 +976,14 @@ public class SettingsActivity extends Activity {
         private static final String[] UNITS = {"auto", "C", "F"}, THEMES = {"auto", "light", "dark"},
                 CLOCKS = {"auto", "24", "12"};
         /** Home Settings: language, temperature, theme, clock, my photos, sounds, top of the screen, picks, Continue
-         *  Watching's apps, watch from the screensaver, Android apps, status icons, Recent Apps, weather, city, forecast,
-         *  now playing, Home Assistant (only on builds with its address), quotes, one row per coin, then the TMDB and Watchmode keys and
-         *  updates (the last row). */
+         *  Watching's apps, watch from the screensaver, Android apps, the Live TV shortcut, status icons, Recent Apps,
+         *  weather, city, forecast, now playing, Home Assistant (only on builds with its address), quotes, one row per
+         *  coin, then the TMDB and Watchmode keys and updates (the last row). */
         private static final int CLOCK_ROW = 3, PHOTOS_ROW = 4, TOP_ROW = 6, PICKS_ROW = 7, WATCH_ROW = 8,
-                SAVER_ROW = 9, ANDROID_APPS_ROW = 10, STATUS_ICONS_ROW = 11, RECENTS_ROW = 12, POWER_ON_ROW = 13,
-                WEATHER_ROW = 14, CITY_ROW = 15, FORECAST_ROW = 16, PLAYING_ROW = 17, HOME_ROW = Config.HOME_ASSISTANT ? 18 : -1,
-                QUOTES_ROW = Config.HOME_ASSISTANT ? 19 : 18, COIN_ROWS = QUOTES_ROW + 1;
+                SAVER_ROW = 9, ANDROID_APPS_ROW = 10, LIVE_TV_ROW = 11, PIN_ROW = 12, LOCKED_ROW = 13,
+                STATUS_ICONS_ROW = 14, RECENTS_ROW = 15, POWER_ON_ROW = 16, WEATHER_ROW = 17, CITY_ROW = 18,
+                FORECAST_ROW = 19, PLAYING_ROW = 20, HOME_ROW = Config.HOME_ASSISTANT ? 21 : -1,
+                QUOTES_ROW = Config.HOME_ASSISTANT ? 22 : 21, COIN_ROWS = QUOTES_ROW + 1;
         /** No "home" on Xiaomi TVs: their remote sends one Home press as a burst of presses (HomeView.BURST_MS). */
         private static final String[] RECENTS = RemoteKeys.XIAOMI ? new String[] {"off", "drawer"}
                 : new String[] {"off", "drawer", "home"};
@@ -1006,6 +1007,9 @@ public class SettingsActivity extends Activity {
             l.add(Ui.tr("Continue Watching apps"));
             l.add(Ui.tr("Watch from the screensaver"));
             l.add(Ui.tr("Android apps"));
+            l.add(Ui.tr("Live TV"));
+            l.add(Ui.tr("PIN"));
+            l.add(Ui.tr("Locked apps"));
             l.add(Ui.tr("Status icons"));   // before the weather widget: City and Forecast are the widget's
             l.add(Ui.tr("Recent Apps"));
             l.add(Ui.tr("At power-on"));
@@ -1117,6 +1121,9 @@ public class SettingsActivity extends Activity {
             String power = Prefs.powerOn();
             v[POWER_ON_ROW] = power.equals("home") ? Ui.tr("power|Home screen") : power.equals("live") ? Ui.tr("Live TV") : Ui.tr("TV's choice");
             v[ANDROID_APPS_ROW] = onOff(Prefs.androidApps());
+            v[LIVE_TV_ROW] = onOff(Prefs.liveTv());
+            v[PIN_ROW] = Prefs.pinSet() ? "••••" : Ui.tr("Not set");
+            v[LOCKED_ROW] = Prefs.lockedApps().isEmpty() ? "—" : String.valueOf(Prefs.lockedApps().size());
             v[STATUS_ICONS_ROW] = onOff(Prefs.statusIcons());
             v[WEATHER_ROW] = onOff(Prefs.weather());
             v[CITY_ROW] = !cityStatus.isEmpty() ? cityStatus : Prefs.city().isEmpty() ? "—" : Prefs.city();
@@ -1486,6 +1493,9 @@ public class SettingsActivity extends Activity {
                     return;
                 }
                 case ANDROID_APPS_ROW: Prefs.setAndroidApps(!Prefs.androidApps()); break;
+                case LIVE_TV_ROW: Prefs.setLiveTv(!Prefs.liveTv()); break;
+                case PIN_ROW: askPin(); return;
+                case LOCKED_ROW: askLockedApps(); return;
                 case STATUS_ICONS_ROW: {
                     boolean on = !Prefs.statusIcons();
                     Prefs.setStatusIcons(on);
@@ -1512,6 +1522,54 @@ public class SettingsActivity extends Activity {
                     break;
             }
             HomeData.get(getContext()).settingsChanged();
+        }
+
+        /** OK on PIN: sets a new one, or (empty) removes it together with the lock. */
+        private void askPin() {
+            EditText field = new EditText(activity);
+            field.setSingleLine(true);
+            field.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+            new AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(Ui.tr("PIN"))
+                    .setMessage(Ui.tr("Choose a PIN of 4 to 8 digits."))
+                    .setView(field)
+                    .setPositiveButton(Ui.tr("Save"), (d, which) -> {
+                        String pin = field.getText().toString().trim();
+                        if (!pin.isEmpty() && (pin.length() < 4 || pin.length() > 8)) {
+                            Toast.makeText(activity, Ui.tr("The PIN needs 4 to 8 digits."), Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        Prefs.setPin(pin);
+                        invalidate();
+                    })
+                    .setNegativeButton(Ui.tr("Cancel"), null)
+                    .show();
+        }
+
+        /** OK on Locked apps: the apps that ask for the PIN (a list with the ones on the TV, Save keeps the ticks). */
+        private void askLockedApps() {
+            List<String[]> all = HomeApps.launchable(getContext());
+            // Its own settings can't be locked: a forgotten PIN would leave no way back in but clearing the app's data.
+            List<String[]> found = new ArrayList<>();
+            for (String[] app : all) if (!app[0].equals(getContext().getPackageName())) found.add(app);
+            String[] labels = new String[found.size()];
+            boolean[] checked = new boolean[found.size()];
+            java.util.Set<String> locked = Prefs.lockedApps();
+            for (int i = 0; i < found.size(); i++) {
+                labels[i] = found.get(i)[1];
+                checked[i] = locked.contains(found.get(i)[0]);
+            }
+            new AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(Ui.tr("Locked apps"))
+                    .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
+                    .setPositiveButton(Ui.tr("Save"), (d, which) -> {
+                        java.util.Set<String> on = new java.util.HashSet<>();
+                        for (int i = 0; i < checked.length; i++) if (checked[i]) on.add(found.get(i)[0]);
+                        Prefs.setLockedApps(on);
+                        invalidate();
+                    })
+                    .setNegativeButton(Ui.tr("Cancel"), null)
+                    .show();
         }
 
         private void askCity() {

@@ -28,6 +28,7 @@ import android.media.tv.TvInputManager;
 import android.os.Build;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
+import android.widget.EditText;
 import android.view.View;
 
 import java.io.File;
@@ -283,6 +284,7 @@ final class HomeApps {
     static List<Item> topButtons(Context c) {
         List<Item> items = new ArrayList<>();
         for (String key : topButtonKeys()) {
+            if (TOP_LIVE.equals(key) && !Prefs.liveTv()) continue;   // turned off: no Live TV circle either
             Item item = topButton(key);
             if (TOP_STORE.equals(key)) {
                 item.pkg = c == null ? null : storePackage(c);
@@ -325,7 +327,7 @@ final class HomeApps {
     /** Live TV, the HDMI inputs with a device sending a signal, and All Apps. */
     static List<Item> shortcuts(Context c) {
         List<Item> items = new ArrayList<>();
-        if (liveTv(c) != null) {
+        if (Prefs.liveTv() && liveTv(c) != null) {
             items.add(shortcut(LIVE_TV, "live", Ui.tr("Live TV"), "tv"));
         }
         items.addAll(inputs(c));
@@ -428,7 +430,7 @@ final class HomeApps {
     /** For the bottom drawer: live TV and every HDMI input (the ones with no device are shown dimmed). */
     static List<Item> allInputs(Context c) {
         List<Item> items = new ArrayList<>();
-        if (liveTv(c) != null) items.add(shortcut(LIVE_TV, "live", Ui.tr("Live TV"), "tv"));
+        if (Prefs.liveTv() && liveTv(c) != null) items.add(shortcut(LIVE_TV, "live", Ui.tr("Live TV"), "tv"));
         items.addAll(inputs(c, true));
         return items;
     }
@@ -628,6 +630,33 @@ final class HomeApps {
 
     /** Opens the item; `options` for the transition, or null (the screensaver has no card to grow out of). */
     static boolean open(Context a, Item it, android.os.Bundle options) {
+        // An app under the PIN (Home Settings > PIN and Locked apps) is asked about first, here so every way in
+        // (the shelf, All Apps, Recent Apps, the drawer, the screensaver's picks) is covered.
+        if (it.kind == APP && Prefs.locked(it.pkg)) return openWithPin(a, it, options);
+        return openNow(a, it, options);
+    }
+
+    /** Asks for the PIN, then opens the app. Without an Activity to show the dialog in (the screensaver), it stays shut. */
+    private static boolean openWithPin(Context a, Item it, android.os.Bundle options) {
+        if (!(a instanceof Activity)) return false;
+        Activity activity = (Activity) a;
+        EditText field = new EditText(activity);
+        field.setSingleLine(true);
+        field.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        new android.app.AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(Ui.tr("PIN"))
+                .setMessage(Ui.trf("Enter the PIN to open {app}.", "app", it.label))
+                .setView(field)
+                .setPositiveButton(Ui.tr("OK"), (d, which) -> {
+                    if (Prefs.checkPin(field.getText().toString())) openNow(activity, it, options);
+                    else android.widget.Toast.makeText(activity, Ui.tr("Wrong PIN"), android.widget.Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(Ui.tr("Cancel"), null)
+                .show();
+        return true;
+    }
+
+    private static boolean openNow(Context a, Item it, android.os.Bundle options) {
         // plain: tried when `intent` finds nothing (the app's own home, when it won't take the title's address)
         Intent intent, plain = null;
         switch (it.kind) {
