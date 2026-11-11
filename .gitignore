@@ -20,3 +20,4 @@ tools/.i18n-cache.json
 
 # Amp orb runtime files
 .amp/portals/
+.amp/in/
