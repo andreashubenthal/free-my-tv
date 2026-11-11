@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Sets up an Amp orb for Free My TV: JDK 17, the Android SDK (build-tools 34, platform android-34, adb),
+# Python with Pillow, Node and zip. Enough to run tools/check.sh, which is what CI runs.
+#
+# JDK 17, not Debian's newer one: build-tools 34's d8 (R8 8.2.2) crashes with an internal
+# NullPointerException on the inner classes javac 21+ emits, so the app cannot be built with it.
+# .github/workflows/check.yml pins the same JDK 17, build-tools 34.0.0 and android-34.
+set -euo pipefail
+
+step() { printf '\n==> %s\n' "$*"; }
+
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+
+# --- System packages: zip for build.sh, Pillow for tools/make_art.py, Node for tools/check.sh web
+need=()
+for p in zip unzip python3-pil curl ca-certificates; do
+  dpkg -s "$p" >/dev/null 2>&1 || need+=("$p")
+done
+command -v node >/dev/null 2>&1 || need+=(nodejs npm)
+if [ ${#need[@]} -gt 0 ]; then
+  step "Installing system packages: ${need[*]}"
+  $SUDO apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y --no-install-recommends "${need[@]}"
+else
+  echo "System packages already installed."
+fi
+
+# --- JDK 17 (Temurin): Debian 13 only ships OpenJDK 21 and 25
+JDK_HOME="$HOME/.jdks/temurin-17"
+if [ ! -x "$JDK_HOME/bin/javac" ]; then
+  step "Installing Temurin JDK 17 in $JDK_HOME"
+  tmp="$(mktemp -d)"
+  curl -fsSL -o "$tmp/jdk17.tar.gz" \
+    "https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jdk/hotspot/normal/eclipse"
+  rm -rf "$JDK_HOME"
+  mkdir -p "$JDK_HOME"
+  tar xzf "$tmp/jdk17.tar.gz" -C "$JDK_HOME" --strip-components=1
+  rm -rf "$tmp"
+else
+  echo "Temurin JDK 17 already installed."
+fi
+export JAVA_HOME="$JDK_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
+
+# --- Android SDK in $HOME, outside the repository
+SDK="$HOME/android-sdk"
+SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+if [ ! -x "$SDKM" ]; then
+  step "Installing Android command-line tools"
+  tmp="$(mktemp -d)"
+  curl -fsSL -o "$tmp/tools.zip" \
+    https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+  unzip -q "$tmp/tools.zip" -d "$tmp"
+  mkdir -p "$SDK/cmdline-tools"
+  rm -rf "$SDK/cmdline-tools/latest"
+  mv "$tmp/cmdline-tools" "$SDK/cmdline-tools/latest"
+  rm -rf "$tmp"
+else
+  echo "Android command-line tools already installed."
+fi
+export ANDROID_HOME="$SDK"
+export ANDROID_SDK_ROOT="$SDK"
+
+pkgs=()
+[ -d "$SDK/build-tools/34.0.0" ] || pkgs+=("build-tools;34.0.0")
+[ -d "$SDK/platforms/android-34" ] || pkgs+=("platforms;android-34")
+[ -d "$SDK/platform-tools" ] || pkgs+=("platform-tools")
+if [ ${#pkgs[@]} -gt 0 ]; then
+  step "Installing SDK packages: ${pkgs[*]}"
+  yes | "$SDKM" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
+  "$SDKM" --sdk_root="$SDK" "${pkgs[@]}" >/dev/null
+else
+  echo "SDK packages already installed."
+fi
+
+# --- Persist the environment for Amp and for non-interactive login shells.
+# The block is rewritten each run so a changed JDK path replaces an older one.
+profile="$HOME/.bash_profile"
+touch "$profile"
+sed -i '/^# >>> free-my-tv toolchain >>>$/,/^# <<< free-my-tv toolchain <<<$/d' "$profile"
+step "Adding the toolchain to $profile"
+cat >>"$profile" <<EOF
+# >>> free-my-tv toolchain >>>
+# build.sh and the tests compile Spanish and Portuguese strings: javac needs a UTF-8 charset.
+: "\${LANG:=C.UTF-8}"
+export LANG
+export JAVA_HOME="$JDK_HOME"
+export ANDROID_HOME="$SDK"
+export ANDROID_SDK_ROOT="$SDK"
+case ":\$PATH:" in
+  *":\$ANDROID_HOME/platform-tools:"*) ;;
+  *) export PATH="\$JAVA_HOME/bin:\$ANDROID_HOME/build-tools/34.0.0:\$ANDROID_HOME/platform-tools:\$PATH" ;;
+esac
+# <<< free-my-tv toolchain <<<
+EOF
+
+guidance="$HOME/.config/amp/AGENTS.md"
+mkdir -p "$(dirname "$guidance")"
+touch "$guidance"
+sed -i '/^<!-- free-my-tv orb >>>$/,/^<!-- free-my-tv orb <<<$/d' "$guidance"
+step "Adding orb notes to $guidance"
+cat >>"$guidance" <<'EOF'
+<!-- free-my-tv orb >>>
+Android SDK at ~/android-sdk (build-tools 34, platform android-34, adb); JDK 17 at ~/.jdks/temurin-17 is on PATH on
+purpose, because build-tools 34's d8 crashes on class files from newer javac. Do not switch to a newer JDK.
+tools/check.sh is the check CI runs and what a change should pass: android builds the app and runs the Java tests,
+web checks the catalogues and packs the LG and Samsung apps (Python and Node are installed).
+No TV is reachable from an orb: build and inspect the packages here, and leave adb connect, the webOS and Tizen
+installs, and every on-TV step to the person.
+<!-- free-my-tv orb <<<
+EOF
+
+# --- Check the toolchain the way the repository uses it: an inner class through d8 is the pairing that breaks
+step "Toolchain"
+"$JAVA_HOME/bin/javac" -version
+"$SDK/build-tools/34.0.0/aapt2" version
+"$SDK/platform-tools/adb" version | head -n 1
+python3 -c 'import PIL; print("Pillow", PIL.__version__)'
+node --version
+
+step "Compiling and dexing a sample class"
+tmp="$(mktemp -d)"
+printf 'class SetupCheck { private final Inner i = new Inner(); private final class Inner {} }\n' >"$tmp/SetupCheck.java"
+"$JAVA_HOME/bin/javac" -nowarn -source 8 -target 8 -d "$tmp" "$tmp/SetupCheck.java"
+"$SDK/build-tools/34.0.0/d8" --release --min-api 28 --lib "$SDK/platforms/android-34/android.jar" \
+  --output "$tmp" "$tmp/SetupCheck.class" "$tmp/SetupCheck\$Inner.class"
+rm -rf "$tmp"
+echo "Setup done."
